@@ -141,6 +141,7 @@ public class DLedgerEntryPusher {
 
     public CompletableFuture<AppendEntryResponse> waitAck(DLedgerEntry entry, boolean isBatchWait) {
         updatePeerWaterMark(entry.getTerm(), memberState.getSelfId(), entry.getIndex());
+        //没有需要同步的slave，单节点
         if (memberState.getPeerMap().size() == 1) {
             AppendEntryResponse response = new AppendEntryResponse();
             response.setGroup(memberState.getGroup());
@@ -153,6 +154,7 @@ public class DLedgerEntryPusher {
             }
             return AppendFuture.newCompletedFuture(entry.getPos(), response);
         } else {
+            //需要同步的slave
             checkTermForPendingMap(entry.getTerm(), "waitAck");
             AppendFuture<AppendEntryResponse> future;
             if (isBatchWait) {
@@ -178,6 +180,7 @@ public class DLedgerEntryPusher {
     /**
      * This thread will check the quorum index and complete the pending requests.
      */
+    //slave同步命令，leader发送出来
     private class QuorumAckChecker extends ShutdownAbleThread {
 
         private long lastPrintWatermarkTimeMs = System.currentTimeMillis();
@@ -200,14 +203,17 @@ public class DLedgerEntryPusher {
                     waitForRunning(1);
                     return;
                 }
+
                 long currTerm = memberState.currTerm();
                 checkTermForPendingMap(currTerm, "QuorumAckChecker");
                 checkTermForWaterMark(currTerm, "QuorumAckChecker");
+
                 if (pendingAppendResponsesByTerm.size() > 1) {
                     for (Long term : pendingAppendResponsesByTerm.keySet()) {
                         if (term == currTerm) {
                             continue;
                         }
+                        //检测当前term周期过了
                         for (Map.Entry<Long, TimeoutFuture<AppendEntryResponse>> futureEntry : pendingAppendResponsesByTerm.get(term).entrySet()) {
                             AppendEntryResponse response = new AppendEntryResponse();
                             response.setGroup(memberState.getGroup());
@@ -220,6 +226,7 @@ public class DLedgerEntryPusher {
                         pendingAppendResponsesByTerm.remove(term);
                     }
                 }
+
                 if (peerWaterMarksByTerm.size() > 1) {
                     for (Long term : peerWaterMarksByTerm.keySet()) {
                         if (term == currTerm) {
@@ -229,6 +236,7 @@ public class DLedgerEntryPusher {
                         peerWaterMarksByTerm.remove(term);
                     }
                 }
+
                 Map<String, Long> peerWaterMarks = peerWaterMarksByTerm.get(currTerm);
 
                 List<Long> sortedWaterMarks = peerWaterMarks.values()

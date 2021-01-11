@@ -58,18 +58,22 @@ public class AppendAndGetTest extends ServerTestHarness {
         launchServer(group, peers, selfId, selfId, DLedgerConfig.FILE);
         DLedgerClient dLedgerClient = launchClient(group, peers);
         long expectedPos = 0L;
+
         for (long i = 0; i < 10; i++) {
-            AppendEntryResponse appendEntryResponse = dLedgerClient.append(new byte[100]);
+            String s = "wo shi tian cai" + i;
+            AppendEntryResponse appendEntryResponse = dLedgerClient.append(s.getBytes());
             Assert.assertEquals(appendEntryResponse.getCode(), DLedgerResponseCode.SUCCESS.getCode());
             Assert.assertEquals(i, appendEntryResponse.getIndex());
             Assert.assertEquals(expectedPos, appendEntryResponse.getPos());
-            expectedPos = expectedPos + DLedgerEntry.BODY_OFFSET + 100;
+            expectedPos = expectedPos + DLedgerEntry.BODY_OFFSET + s.length();
         }
+
         for (long i = 0; i < 10; i++) {
+            String s = "wo shi tian cai" + i;
             GetEntriesResponse getEntriesResponse = dLedgerClient.get(i);
             Assert.assertEquals(1, getEntriesResponse.getEntries().size());
             Assert.assertEquals(i, getEntriesResponse.getEntries().get(0).getIndex());
-            Assert.assertArrayEquals(new byte[100], getEntriesResponse.getEntries().get(0).getBody());
+            Assert.assertArrayEquals(s.getBytes(), getEntriesResponse.getEntries().get(0).getBody());
         }
     }
 

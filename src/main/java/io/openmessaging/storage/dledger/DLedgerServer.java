@@ -46,6 +46,7 @@ import io.openmessaging.storage.dledger.utils.PreConditions;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +91,7 @@ public class DLedgerServer implements DLedgerProtocolHander {
         this.dLedgerRpcService.startup();
         this.dLedgerEntryPusher.startup();
         this.dLedgerLeaderElector.startup();
+
         executorService.scheduleAtFixedRate(this::checkPreferredLeader, 1000, 1000, TimeUnit.MILLISECONDS);
     }
 
@@ -146,9 +148,9 @@ public class DLedgerServer implements DLedgerProtocolHander {
 
     /**
      * Handle the append requests:
-     * 1.append the entry to local store
-     * 2.submit the future to entry pusher and wait the quorum ack
-     * 3.if the pending requests are full, then reject it immediately
+     * 1.append the entry to local store 本地存下
+     * 2.submit the future to entry pusher and wait the quorum ack 同步给slave
+     * 3.if the pending requests are full, then reject it immediately  等待队列满了，直接拒绝
      *
      * @param request
      * @return
@@ -161,7 +163,9 @@ public class DLedgerServer implements DLedgerProtocolHander {
             PreConditions.check(memberState.getGroup().equals(request.getGroup()), DLedgerResponseCode.UNKNOWN_GROUP, "%s != %s", request.getGroup(), memberState.getGroup());
             PreConditions.check(memberState.isLeader(), DLedgerResponseCode.NOT_LEADER);
             PreConditions.check(memberState.getTransferee() == null, DLedgerResponseCode.LEADER_TRANSFERRING);
+
             long currTerm = memberState.currTerm();
+            //满了拒绝
             if (dLedgerEntryPusher.isPendingFull(currTerm)) {
                 AppendEntryResponse appendEntryResponse = new AppendEntryResponse();
                 appendEntryResponse.setGroup(memberState.getGroup());
@@ -258,7 +262,8 @@ public class DLedgerServer implements DLedgerProtocolHander {
         return null;
     }
 
-    @Override public CompletableFuture<PushEntryResponse> handlePush(PushEntryRequest request) throws Exception {
+    @Override
+    public CompletableFuture<PushEntryResponse> handlePush(PushEntryRequest request) throws Exception {
         try {
             PreConditions.check(memberState.getSelfId().equals(request.getRemoteId()), DLedgerResponseCode.UNKNOWN_MEMBER, "%s != %s", request.getRemoteId(), memberState.getSelfId());
             PreConditions.check(memberState.getGroup().equals(request.getGroup()), DLedgerResponseCode.UNKNOWN_GROUP, "%s != %s", request.getGroup(), memberState.getGroup());
@@ -327,8 +332,8 @@ public class DLedgerServer implements DLedgerProtocolHander {
             return;
         }
 
-        if (!memberState.getPeersLiveTable().containsKey(preferredLeaderId) ||
-            memberState.getPeersLiveTable().get(preferredLeaderId) == Boolean.FALSE) {
+        Map<String, Boolean> peersLiveTable = memberState.getPeersLiveTable();
+        if (!peersLiveTable.containsKey(preferredLeaderId) || peersLiveTable.get(preferredLeaderId) == Boolean.FALSE) {
             logger.warn("preferredLeaderId = {} is not online", preferredLeaderId);
             return;
         }

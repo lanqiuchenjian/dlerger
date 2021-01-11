@@ -50,13 +50,15 @@ public class ServerTestHarness extends ServerTestBase {
     protected synchronized DLedgerServer launchServer(String group, String peers, String selfId, String leaderId,
         String storeType) {
         DLedgerConfig config = new DLedgerConfig();
+
         config.group(group).selfId(selfId).peers(peers);
         config.setStoreBaseDir(FileTestUtil.TEST_BASE + File.separator + group);
         config.setStoreType(storeType);
-        config.setMappedFileSizeForEntryData(10 * 1024 * 1024);
+        config.setMappedFileSizeForEntryData(2 * 1024);
         config.setEnableLeaderElector(false);
         config.setEnableDiskForceClean(false);
         config.setDiskSpaceRatioToForceClean(0.90f);
+
         DLedgerServer dLedgerServer = new DLedgerServer(config);
         MemberState memberState = dLedgerServer.getMemberState();
         memberState.setCurrTermForTest(0);
@@ -68,7 +70,9 @@ public class ServerTestHarness extends ServerTestBase {
         bases.add(config.getDataStorePath());
         bases.add(config.getIndexStorePath());
         bases.add(config.getDefaultPath());
+
         dLedgerServer.startup();
+
         return dLedgerServer;
     }
 

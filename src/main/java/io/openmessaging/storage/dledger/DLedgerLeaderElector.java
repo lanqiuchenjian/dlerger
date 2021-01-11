@@ -99,21 +99,24 @@ public class DLedgerLeaderElector {
     }
 
     public CompletableFuture<HeartBeatResponse> handleHeartBeat(HeartBeatRequest request) throws Exception {
-
+        //应该不会出现吧，不在server id中
         if (!memberState.isPeerMember(request.getLeaderId())) {
             logger.warn("[BUG] [HandleHeartBeat] remoteId={} is an unknown member", request.getLeaderId());
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.UNKNOWN_MEMBER.getCode()));
         }
 
+        //当前id = leader，不会接受心跳的
         if (memberState.getSelfId().equals(request.getLeaderId())) {
             logger.warn("[BUG] [HandleHeartBeat] selfId={} but remoteId={}", memberState.getSelfId(), request.getLeaderId());
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.UNEXPECTED_MEMBER.getCode()));
         }
 
+        //过期的选举周期
         if (request.getTerm() < memberState.currTerm()) {
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.EXPIRED_TERM.getCode()));
         } else if (request.getTerm() == memberState.currTerm()) {
             if (request.getLeaderId().equals(memberState.getLeaderId())) {
+                //回复正常的心跳
                 lastLeaderHeartBeatTime = System.currentTimeMillis();
                 return CompletableFuture.completedFuture(new HeartBeatResponse());
             }
@@ -125,6 +128,8 @@ public class DLedgerLeaderElector {
             if (request.getTerm() < memberState.currTerm()) {
                 return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.EXPIRED_TERM.getCode()));
             } else if (request.getTerm() == memberState.currTerm()) {
+                //TODO:cj 新加入的没有leader，直接置心跳的为leader
+                //此版本不支持动态加入节点，选为leader的发动心跳，candidate接受成为follower
                 if (memberState.getLeaderId() == null) {
                     changeRoleToFollower(request.getTerm(), request.getLeaderId());
                     return CompletableFuture.completedFuture(new HeartBeatResponse());
@@ -132,6 +137,7 @@ public class DLedgerLeaderElector {
                     lastLeaderHeartBeatTime = System.currentTimeMillis();
                     return CompletableFuture.completedFuture(new HeartBeatResponse());
                 } else {
+                    //不一致leader，不会出现
                     //this should not happen, but if happened
                     logger.error("[{}][BUG] currTerm {} has leader {}, but received leader {}", memberState.getSelfId(), memberState.currTerm(), memberState.getLeaderId(), request.getLeaderId());
                     return CompletableFuture.completedFuture(new HeartBeatResponse().code(DLedgerResponseCode.INCONSISTENT_LEADER.getCode()));
@@ -141,7 +147,7 @@ public class DLedgerLeaderElector {
                 //first change to candidate, and notify the state-maintainer thread
                 changeRoleToCandidate(request.getTerm());
                 needIncreaseTermImmediately = true;
-                //TOOD notify
+                //TODO notify
                 return CompletableFuture.completedFuture(new HeartBeatResponse().code(DLedgerResponseCode.TERM_NOT_READY.getCode()));
             }
         }
@@ -282,13 +288,13 @@ public class DLedgerLeaderElector {
                             break;
                     }
 
+                    //超时
                     if (x.getCode() == DLedgerResponseCode.NETWORK_ERROR.getCode())
                         memberState.getPeersLiveTable().put(id, Boolean.FALSE);
                     else
                         memberState.getPeersLiveTable().put(id, Boolean.TRUE);
 
-                    if (memberState.isQuorum(succNum.get())
-                        || memberState.isQuorum(succNum.get() + notReadyNum.get())) {
+                    if (memberState.isQuorum(succNum.get()) || memberState.isQuorum(succNum.get() + notReadyNum.get())) {
                         beatLatch.countDown();
                     }
                 } catch (Throwable t) {
@@ -302,14 +308,23 @@ public class DLedgerLeaderElector {
             });
         }
         beatLatch.await(heartBeatTimeIntervalMs, TimeUnit.MILLISECONDS);
+        //成功响应的大于（整体的1/2 + 1）
         if (memberState.isQuorum(succNum.get())) {
             lastSuccHeartBeatTime = System.currentTimeMillis();
         } else {
             logger.info("[{}] Parse heartbeat responses in cost={} term={} allNum={} succNum={} notReadyNum={} inconsistLeader={} maxTerm={} peerSize={} lastSuccHeartBeatTime={}",
                 memberState.getSelfId(), DLedgerUtils.elapsed(startHeartbeatTimeMs), term, allNum.get(), succNum.get(), notReadyNum.get(), inconsistLeader.get(), maxTerm.get(), memberState.peerSize(), new Timestamp(lastSuccHeartBeatTime));
+
             if (memberState.isQuorum(succNum.get() + notReadyNum.get())) {
                 lastSendHeartBeatTime = -1;
-            } else if (maxTerm.get() > term) {
+            }
+            //三种情况leader会切换到candidate
+            /**
+             * 1.当前过期的选举term
+             * 2.不一致的leader
+             * 3.当前距上次心跳成功间隔时间 > 最大心跳间隔
+             */
+            else if (maxTerm.get() > term) {
                 changeRoleToCandidate(maxTerm.get());
             } else if (inconsistLeader.get()) {
                 changeRoleToCandidate(term);
@@ -520,8 +535,10 @@ public class DLedgerLeaderElector {
     }
 
     /**
-     * The core method of maintainer. Run the specified logic according to the current role: candidate => propose a
-     * vote. leader => send heartbeats to followers, and step down to candidate when quorum followers do not respond.
+     * The core method of maintainer. Run the specified logic according to the current role:
+     *
+     * candidate => propose a vote.
+     * leader => send heartbeats to followers, and step down to candidate when quorum followers do not respond.
      * follower => accept heartbeats, and change to candidate when no heartbeat from leader.
      *
      * @throws Exception
@@ -675,6 +692,7 @@ public class DLedgerLeaderElector {
         }
     }
 
+    //角色切换实现方法
     public interface RoleChangeHandler {
         void handle(long term, MemberState.Role role);
 

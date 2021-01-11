@@ -59,6 +59,7 @@ public class MemberState {
     public MemberState(DLedgerConfig config) {
         this.group = config.getGroup();
         this.selfId = config.getSelfId();
+        //启动的时候会在每个server端配置所有的server信息
         this.peers = config.getPeers();
         for (String peerInfo : this.peers.split(";")) {
             String peerSelfId = peerInfo.split("-")[0];

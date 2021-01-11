@@ -75,7 +75,8 @@ public class DLedgerConfig {
     private long checkPointInterval = 3000;
 
     private int mappedFileSizeForEntryData = 1024 * 1024 * 1024;
-    private int mappedFileSizeForEntryIndex = DLedgerMmapFileStore.INDEX_UNIT_SIZE * 5 * 1024 * 1024;
+//    private int mappedFileSizeForEntryIndex = DLedgerMmapFileStore.INDEX_UNIT_SIZE * 5 * 1024 * 1024;
+    private int mappedFileSizeForEntryIndex = 2 * 1024;
 
     private boolean enablePushToFollower = true;
 

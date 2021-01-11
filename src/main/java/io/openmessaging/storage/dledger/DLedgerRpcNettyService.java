@@ -18,6 +18,7 @@ package io.openmessaging.storage.dledger;
 
 import com.alibaba.fastjson.JSON;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.concurrent.CompleteFuture;
 import io.openmessaging.storage.dledger.protocol.AppendEntryRequest;
 import io.openmessaging.storage.dledger.protocol.AppendEntryResponse;
 import io.openmessaging.storage.dledger.protocol.DLedgerRequestCode;
@@ -38,10 +39,8 @@ import io.openmessaging.storage.dledger.protocol.RequestOrResponse;
 import io.openmessaging.storage.dledger.protocol.VoteRequest;
 import io.openmessaging.storage.dledger.protocol.VoteResponse;
 import io.openmessaging.storage.dledger.utils.DLedgerUtils;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.rocketmq.remoting.netty.NettyClientConfig;
 import org.apache.rocketmq.remoting.netty.NettyRemotingClient;
@@ -98,16 +97,20 @@ public class DLedgerRpcNettyService extends DLedgerRpcService {
     public DLedgerRpcNettyService(DLedgerServer dLedgerServer) {
         this.dLedgerServer = dLedgerServer;
         this.memberState = dLedgerServer.getMemberState();
+
+        //netty 请求处理器
         NettyRequestProcessor protocolProcessor = new NettyRequestProcessor() {
             @Override
             public RemotingCommand processRequest(ChannelHandlerContext ctx, RemotingCommand request) throws Exception {
                 return DLedgerRpcNettyService.this.processRequest(ctx, request);
             }
 
-            @Override public boolean rejectRequest() {
+            @Override
+            public boolean rejectRequest() {
                 return false;
             }
         };
+
         //start the remoting server
         NettyServerConfig nettyServerConfig = new NettyServerConfig();
         nettyServerConfig.setListenPort(Integer.valueOf(memberState.getSelfAddr().split(":")[1]));
@@ -131,7 +134,8 @@ public class DLedgerRpcNettyService extends DLedgerRpcService {
         return memberState.getPeerAddr(request.getRemoteId());
     }
 
-    @Override public CompletableFuture<HeartBeatResponse> heartBeat(HeartBeatRequest request) throws Exception {
+    @Override
+    public CompletableFuture<HeartBeatResponse> heartBeat(HeartBeatRequest request) throws Exception {
         CompletableFuture<HeartBeatResponse> future = new CompletableFuture<>();
         heartBeatInvokeExecutor.execute(() -> {
             try {
@@ -326,9 +330,11 @@ public class DLedgerRpcNettyService extends DLedgerRpcService {
                 }, futureExecutor);
                 break;
             }
+            //拼接消息
             case APPEND: {
                 AppendEntryRequest appendEntryRequest = JSON.parseObject(request.getBody(), AppendEntryRequest.class);
                 CompletableFuture<AppendEntryResponse> future = handleAppend(appendEntryRequest);
+                //阻塞，等待同步完成
                 future.whenCompleteAsync((x, y) -> {
                     writeResponse(x, y, request, ctx);
                 }, futureExecutor);
@@ -464,5 +470,63 @@ public class DLedgerRpcNettyService extends DLedgerRpcService {
 
     public void setdLedgerServer(DLedgerServer dLedgerServer) {
         this.dLedgerServer = dLedgerServer;
+    }
+
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+//        ExecutorService executor = Executors.newCachedThreadPool();
+//        Callable task = new Callable<String>() {
+//            @Override
+//            public String call() throws Exception {
+//                Thread.sleep(300);
+//                return "xx";
+//            }
+//        };
+//
+//        String result = "ww";
+//
+//        FutureTask<String> futureTask = new FutureTask<String>(task);
+//        Future<String> submit = executor.submit(futureTask, result);
+//        executor.shutdown();
+//
+//        String s = futureTask.get();
+//
+//        System.out.println("==============");
+//        Object o = submit.get();
+//
+//        System.out.println(s);
+//        System.out.println(o);
+
+        CompletableFuture<AppendEntryResponse> future = new CompletableFuture<>();
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        executorService.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(2000);
+                    future.complete(null);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(10000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+//        AppendEntryResponse appendEntryResponse = future.get();
+        future.whenComplete((a, b) -> {
+            System.out.println("ppp");
+            executorService.shutdown();
+        });
+
+        System.out.println("xxxx");
+//        System.out.println(appendEntryResponse);
     }
 }
